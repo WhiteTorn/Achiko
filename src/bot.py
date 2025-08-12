@@ -240,7 +240,7 @@ def main() -> None:
         drop_pending_updates=True,
         poll_interval=1.5,
         timeout=30,
-        stop_signals=("SIGINT", "SIGTERM"),
+        stop_signals=(signal.SIGINT, signal.SIGTERM),
     )
 
 if __name__ == "__main__":
