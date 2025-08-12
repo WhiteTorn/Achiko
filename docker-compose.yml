@@ -1,0 +1,25 @@
+version: "3.8"
+services:
+  tg-download-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_UID: 10001
+        APP_GID: 10001
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      ALLOWED_TELEGRAM_USER_ID: ${ALLOWED_TELEGRAM_USER_ID}
+      DOWNLOAD_ROOT: /data
+    volumes:
+      - /srv/tg-downloads:/data:rw
+    # Security hardening (works in Portainer standalone stacks)
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=64m
+    user: "10001:10001"
+    restart: unless-stopped
