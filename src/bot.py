@@ -15,6 +15,7 @@ from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
     MessageHandler,
+    CommandHandler,  # added
     filters,
 )
 
@@ -213,7 +214,13 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not user_is_allowed(update) or not is_private_chat(update):
         return
-    await update.message.reply_text("Send or forward media (photo/video/document/audio). I will download it locally.")
+    await update.message.reply_text(
+        "Hello! I’m ready.\n"
+        "- Send or forward media (photo/video/document/audio/voice/animation/video note).\n"
+        "- I will save it to:\n"
+        f"  {DOWNLOAD_DIR}\n"
+        "- Only you can use this bot."
+    )
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     log.exception("Error handling update: %s", context.error)
@@ -224,10 +231,16 @@ def build_app() -> Application:
         .token(BOT_TOKEN)
         .build()
     )
-    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.User(ALLOWED_TELEGRAM_USER_ID) & MEDIA_FILTER, handle_media))
-    # Optional start command for the allowed user only (not strictly required)
-    # from telegram.ext import CommandHandler
-    # app.add_handler(CommandHandler("start", start, filters=filters.ChatType.PRIVATE & filters.User(ALLOWED_TELEGRAM_USER_ID)))
+    app.add_handler(MessageHandler(
+        filters.ChatType.PRIVATE & filters.User(ALLOWED_TELEGRAM_USER_ID) & MEDIA_FILTER,
+        handle_media
+    ))
+    # Register /start for the allowed user in a private chat
+    app.add_handler(CommandHandler(
+        "start",
+        start,
+        filters=filters.ChatType.PRIVATE & filters.User(ALLOWED_TELEGRAM_USER_ID)
+    ))
     app.add_error_handler(error_handler)
     return app
 
