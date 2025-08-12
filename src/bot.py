@@ -6,6 +6,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
+import signal
 
 from dotenv import load_dotenv
 from telegram import Update, constants, File
