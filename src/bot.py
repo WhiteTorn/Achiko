@@ -119,7 +119,7 @@ def is_private_chat(update: Update) -> bool:
 MEDIA_FILTER = (
     filters.PHOTO
     | filters.VIDEO
-    | filters.DOCUMENT
+    | filters.Document.ALL
     | filters.AUDIO
     | filters.VOICE
     | filters.VIDEO_NOTE
