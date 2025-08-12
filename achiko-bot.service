@@ -1,0 +1,30 @@
+[Unit]
+Description=Telegram Media Download Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tgdownloader
+Group=tgdownloader
+WorkingDirectory=/opt/tg-download-bot
+EnvironmentFile=/opt/tg-download-bot/.env
+ExecStart=/opt/tg-download-bot/.venv/bin/python src/bot.py
+Restart=on-failure
+RestartSec=5
+
+# Security hardening (adjust as needed)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/srv/tg-downloads
+CapabilityBoundingSet=
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX,AF_INET,AF_INET6
+
+[Install]
+WantedBy=multi-user.target
