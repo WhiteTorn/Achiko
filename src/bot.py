@@ -215,11 +215,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not user_is_allowed(update) or not is_private_chat(update):
         return
     await update.message.reply_text(
-        "Hello! I’m ready.\n"
-        "- Send or forward media (photo/video/document/audio/voice/animation/video note).\n"
-        "- I will save it to:\n"
-        f"  {DOWNLOAD_DIR}\n"
-        "- Only you can use this bot."
+        "👋 Hey there!\n\n"
+        "I'm all set and ready to help you.\n\n"
+        "📩 Just send or forward me any *media* (photos, videos, documents...)\n"
+        "💾 I’ll save everything neatly into:\n"
+        f"   `{DOWNLOAD_DIR}`\n\n"
+        "🔒 Don’t worry — only *you* can use this bot!"
     )
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
