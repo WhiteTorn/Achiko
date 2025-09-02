@@ -18,6 +18,7 @@ from telegram.ext import (
     CommandHandler,  # added
     filters,
 )
+from telegram.constants import ParseMode
 
 # ---------------------------
 # Configuration and logging
@@ -215,12 +216,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not user_is_allowed(update) or not is_private_chat(update):
         return
     await update.message.reply_text(
-        "👋 Hey there!\n\n"
+        "👋 <b>Hey there!</b>\n\n"
         "I'm all set and ready to help you.\n\n"
-        "📩 Just send or forward me any *media* (photos, videos, documents...)\n"
+        "📩 Just send or forward me any <i>media</i> (photos, videos, documents...)\n\n"
         "💾 I’ll save everything neatly into:\n"
-        f"   `{DOWNLOAD_DIR}`\n\n"
-        "🔒 Don’t worry — only *you* can use this bot!"
+        f"   <code>{DOWNLOAD_DIR}</code>\n\n"
+        "🔒 Don’t worry — only <b>you</b> can use this bot!",
+        parse_mode=ParseMode.HTML
     )
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
