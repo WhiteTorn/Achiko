@@ -170,9 +170,26 @@ async def send_file_to_telegram(context: ContextTypes.DEFAULT_TYPE,
                                chat_id: int) -> Tuple[bool, str]:
     """Send a file to Telegram chat"""
     try:
+        # Initialize mimetypes if needed
+        if not mimetypes.inited:
+            mimetypes.init()
+        
         # Get file info
         mime_type, _ = mimetypes.guess_type(str(file_path))
         file_size = file_path.stat().st_size
+        
+        # Fallback for unknown mime types
+        if not mime_type:
+            # Try to guess from extension
+            ext = file_path.suffix.lower()
+            if ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']:
+                mime_type = 'image/' + ext.lstrip('.')
+            elif ext in ['.mp4', '.avi', '.mov', '.mkv', '.webm']:
+                mime_type = 'video/' + ext.lstrip('.')
+            elif ext in ['.mp3', '.wav', '.ogg', '.m4a', '.flac']:
+                mime_type = 'audio/' + ext.lstrip('.')
+            else:
+                mime_type = 'application/octet-stream'  # Default fallback
         
         # Check file size (Telegram limits)
         if file_size > 50 * 1024 * 1024:  # 50MB limit
@@ -210,6 +227,7 @@ async def send_file_to_telegram(context: ContextTypes.DEFAULT_TYPE,
         return True, f"✅ Successfully sent: {filename}"
         
     except Exception as e:
+        log.error("Error sending file %s: %s", file_path, str(e))
         return False, f"❌ Failed to send file: {str(e)}"
 
 # ---------------------------
