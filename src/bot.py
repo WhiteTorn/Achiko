@@ -125,6 +125,92 @@ def is_private_chat(update: Update) -> bool:
     chat = update.effective_chat
     return bool(chat and chat.type == "private")
 
+# Add these functions after the existing helper functions (around line 120):
+
+def get_upload_files(upload_dir: Path) -> List[Tuple[str, int]]:
+    """Get list of files with their sizes from upload directory"""
+    files = []
+    try:
+        for file_path in upload_dir.rglob("*"):
+            if file_path.is_file():
+                rel_path = file_path.relative_to(upload_dir)
+                size = file_path.stat().st_size
+                files.append((str(rel_path), size))
+    except Exception as e:
+        log.error("Error listing upload files: %s", e)
+    return sorted(files)
+
+def find_upload_file(upload_dir: Path, filename: str) -> Optional[Path]:
+    """Find a file in upload directory (case-insensitive)"""
+    try:
+        # Try exact match first
+        candidate = upload_dir / filename
+        if candidate.is_file():
+            return candidate
+        
+        # Try case-insensitive search
+        for file_path in upload_dir.rglob("*"):
+            if file_path.is_file() and file_path.name.lower() == filename.lower():
+                return file_path
+    except Exception as e:
+        log.error("Error finding file %s: %s", filename, e)
+    return None
+
+def format_file_size(size: int) -> str:
+    """Format file size in human-readable format"""
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if size < 1024:
+            return f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
+
+async def send_file_to_telegram(context: ContextTypes.DEFAULT_TYPE, 
+                               file_path: Path, 
+                               chat_id: int) -> Tuple[bool, str]:
+    """Send a file to Telegram chat"""
+    try:
+        # Get file info
+        mime_type, _ = mimetypes.guess_type(str(file_path))
+        file_size = file_path.stat().st_size
+        
+        # Check file size (Telegram limits)
+        if file_size > 50 * 1024 * 1024:  # 50MB limit
+            return False, "File too large (>50MB). Telegram API limit exceeded."
+        
+        with open(file_path, 'rb') as f:
+            filename = file_path.name
+            
+            # Send based on file type
+            if mime_type and mime_type.startswith('image/'):
+                await context.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=f,
+                    caption=f"📸 {filename}"
+                )
+            elif mime_type and mime_type.startswith('video/'):
+                await context.bot.send_video(
+                    chat_id=chat_id,
+                    video=f,
+                    caption=f"🎥 {filename}"
+                )
+            elif mime_type and mime_type.startswith('audio/'):
+                await context.bot.send_audio(
+                    chat_id=chat_id,
+                    audio=f,
+                    caption=f"🎵 {filename}"
+                )
+            else:
+                await context.bot.send_document(
+                    chat_id=chat_id,
+                    document=f,
+                    caption=f"📄 {filename}"
+                )
+        
+        return True, f"✅ Successfully sent: {filename}"
+        
+    except Exception as e:
+        return False, f"❌ Failed to send file: {str(e)}"
+
 # ---------------------------
 # Core handler
 # ---------------------------
@@ -235,6 +321,71 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         parse_mode=ParseMode.HTML
     )
 
+# Add these command handlers after the start() function:
+
+async def handle_list_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /list command - show available files"""
+    if not user_is_allowed(update) or not is_private_chat(update):
+        return
+    
+    files = get_upload_files(UPLOAD_DIR)
+    
+    if not files:
+        await update.message.reply_text("📁 No files available to send.")
+        return
+    
+    # Format file list
+    file_list = []
+    for filename, size in files[:20]:  # Limit to 20 files to avoid message too long
+        size_str = format_file_size(size)
+        file_list.append(f"📄 <code>{filename}</code> ({size_str})")
+    
+    message = "📁 <b>Available files to send:</b>\n\n" + "\n".join(file_list)
+    
+    if len(files) > 20:
+        message += f"\n\n<i>... and {len(files) - 20} more files</i>"
+    
+    message += f"\n\n💡 Use <code>/send filename</code> to send a file"
+    
+    await update.message.reply_text(message, parse_mode=ParseMode.HTML)
+
+async def handle_send_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /send command - send a specific file"""
+    if not user_is_allowed(update) or not is_private_chat(update):
+        return
+    
+    if not context.args:
+        await update.message.reply_text(
+            "❗ Please specify a filename.\n\n"
+            "Usage: <code>/send filename.ext</code>\n"
+            "Use <code>/list</code> to see available files.",
+            parse_mode=ParseMode.HTML
+        )
+        return
+    
+    filename = " ".join(context.args)  # Handle filenames with spaces
+    
+    # Find the file
+    file_path = find_upload_file(UPLOAD_DIR, filename)
+    
+    if not file_path:
+        await update.message.reply_text(
+            f"❌ File not found: <code>{filename}</code>\n\n"
+            f"Use <code>/list</code> to see available files.",
+            parse_mode=ParseMode.HTML
+        )
+        return
+    
+    # Send status message
+    status_msg = await update.message.reply_text(f"📤 Sending: <code>{filename}</code>...", 
+                                                parse_mode=ParseMode.HTML)
+    
+    # Send the file
+    success, message = await send_file_to_telegram(context, file_path, update.effective_chat.id)
+    
+    # Update status
+    await status_msg.edit_text(message, parse_mode=ParseMode.HTML)
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     log.exception("Error handling update: %s", context.error)
 
@@ -252,6 +403,18 @@ def build_app() -> Application:
     app.add_handler(CommandHandler(
         "start",
         start,
+        filters=filters.ChatType.PRIVATE & filters.User(ALLOWED_TELEGRAM_USER_ID)
+    ))
+    # Add upload commands
+    app.add_handler(CommandHandler(
+        "list",
+        handle_list_command,
+        filters=filters.ChatType.PRIVATE & filters.User(ALLOWED_TELEGRAM_USER_ID)
+    ))
+    
+    app.add_handler(CommandHandler(
+        "send",
+        handle_send_command,
         filters=filters.ChatType.PRIVATE & filters.User(ALLOWED_TELEGRAM_USER_ID)
     ))
     app.add_error_handler(error_handler)
