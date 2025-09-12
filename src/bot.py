@@ -311,13 +311,40 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not user_is_allowed(update) or not is_private_chat(update):
         return
+    
+    # Get some stats for the welcome message
+    try:
+        upload_files = get_upload_files(UPLOAD_DIR)
+        upload_count = len(upload_files)
+    except:
+        upload_count = "?"
+    
     await update.message.reply_text(
-        "👋 <b>Hey there!</b>\n\n"
-        "I'm all set and ready to help you.\n\n"
-        "📩 Just send or forward me any <i>media</i> (photos, videos, documents...)\n\n"
-        "💾 I’ll save everything neatly into:\n"
-        f"   <code>{DOWNLOAD_DIR}</code>\n\n"
-        "🔒 Don’t worry — only <b>you</b> can use this bot!",
+        "🤖 <b>File Transfer Bot</b>\n\n"
+        "👋 Hey there! I can help you transfer files both ways:\n\n"
+        
+        "📥 <b>DOWNLOAD FROM TELEGRAM:</b>\n"
+        "   • Just send me any media (photos, videos, documents, audio...)\n"
+        f"   • I'll save them to: <code>{DOWNLOAD_DIR}</code>\n\n"
+        
+        "📤 <b>SEND TO TELEGRAM:</b>\n"
+        f"   • <code>/list</code> - Show available files ({upload_count} files ready)\n"
+        "   • <code>/send filename.ext</code> - Send a specific file\n"
+        f"   • Files are loaded from: <code>{UPLOAD_DIR}</code>\n\n"
+        
+        "🎯 <b>AVAILABLE COMMANDS:</b>\n"
+        "   • <code>/start</code> - Show this help message\n"
+        "   • <code>/list</code> - List all files available to send\n"
+        "   • <code>/send &lt;filename&gt;</code> - Send a file from PC to Telegram\n\n"
+        
+        "📋 <b>EXAMPLES:</b>\n"
+        "   • <code>/send document.pdf</code>\n"
+        "   • <code>/send photos/vacation.jpg</code>\n"
+        "   • <code>/send music/song.mp3</code>\n\n"
+        
+        "🔒 <b>Security:</b> Only you can use this bot!\n"
+        "📁 <b>File limit:</b> Max 50MB per file (Telegram limit)",
+        
         parse_mode=ParseMode.HTML
     )
 
