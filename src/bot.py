@@ -129,8 +129,10 @@ def is_private_chat(update: Update) -> bool:
 # Add these functions after the existing helper functions (around line 120):
 
 def get_upload_files(upload_dir: Path) -> List[Tuple[str, int]]:
-    """Get list of files with their sizes from upload directory"""
+    """Get list of files with their sizes from both upload and download directories"""
     files = []
+    
+    # Get files from upload directory
     try:
         for file_path in upload_dir.rglob("*"):
             if file_path.is_file():
@@ -139,14 +141,27 @@ def get_upload_files(upload_dir: Path) -> List[Tuple[str, int]]:
                 files.append((str(rel_path), size))
     except Exception as e:
         log.error("Error listing upload files: %s", e)
+    
+    # Get files from download directory  
+    try:
+        for file_path in DOWNLOAD_DIR.rglob("*"):
+            if file_path.is_file():
+                rel_path = file_path.relative_to(DOWNLOAD_DIR)
+                size = file_path.stat().st_size
+                files.append((str(rel_path), size))
+    except Exception as e:
+        log.error("Error listing download files: %s", e)
+    
     return sorted(files)
 
 def get_upload_folders(upload_dir: Path) -> List[str]:
-    """Get list of folders in upload directory"""
+    """Get list of folders from both upload and download directories"""
     folders = []
+    
+    # Get folders from upload directory
     try:
-        # Add root folder option
-        folders.append(".")  # Root folder
+        # Add root folder option for uploads
+        folders.append(".")  # Root upload folder
         
         for item in upload_dir.rglob("*"):
             if item.is_dir():
@@ -154,18 +169,44 @@ def get_upload_folders(upload_dir: Path) -> List[str]:
                 folders.append(str(rel_path))
     except Exception as e:
         log.error("Error listing upload folders: %s", e)
+    
+    # Get folders from download directory
+    try:
+        # Add root folder option for downloads
+        folders.append(".-d")  # Root download folder with -d suffix
+        
+        for item in DOWNLOAD_DIR.rglob("*"):
+            if item.is_dir():
+                rel_path = item.relative_to(DOWNLOAD_DIR)
+                folders.append(str(rel_path) + "-d")  # Add -d suffix for download folders
+    except Exception as e:
+        log.error("Error listing download folders: %s", e)
+    
     return sorted(folders)
 
 def get_files_in_folder(upload_dir: Path, folder_path: str) -> List[Path]:
-    """Get all files in a specific folder (non-recursive)"""
+    """Get all files in a specific folder (non-recursive) from upload or download directory"""
     files = []
+    is_download = folder_path.endswith("-d")
+    
     try:
-        if folder_path == "." or folder_path == "":
-            # Root folder - get files directly in upload_dir
-            target_dir = upload_dir
+        if is_download:
+            # Remove -d suffix and use download directory
+            actual_folder_path = folder_path[:-2]  # Remove "-d"
+            if actual_folder_path == "." or actual_folder_path == "":
+                # Root download folder
+                target_dir = DOWNLOAD_DIR
+            else:
+                # Specific subfolder in downloads
+                target_dir = DOWNLOAD_DIR / actual_folder_path
         else:
-            # Specific subfolder
-            target_dir = upload_dir / folder_path
+            # Upload directory
+            if folder_path == "." or folder_path == "":
+                # Root upload folder
+                target_dir = upload_dir
+            else:
+                # Specific subfolder in uploads
+                target_dir = upload_dir / folder_path
         
         if not target_dir.exists() or not target_dir.is_dir():
             return files
@@ -180,39 +221,62 @@ def get_files_in_folder(upload_dir: Path, folder_path: str) -> List[Path]:
     return sorted(files)
 
 def find_upload_file(upload_dir: Path, filename: str) -> Optional[Path]:
-    """Find a file in upload directory (case-insensitive)"""
+    """Find a file in upload or download directory (case-insensitive)"""
     try:
-        # Try exact match first
+        # First search in upload directory
         candidate = upload_dir / filename
         if candidate.is_file():
             return candidate
         
-        # Try case-insensitive search
+        # Case-insensitive search in upload directory
         for file_path in upload_dir.rglob("*"):
             if file_path.is_file() and file_path.name.lower() == filename.lower():
                 return file_path
+        
+        # Then search in download directory
+        candidate = DOWNLOAD_DIR / filename
+        if candidate.is_file():
+            return candidate
+            
+        # Case-insensitive search in download directory
+        for file_path in DOWNLOAD_DIR.rglob("*"):
+            if file_path.is_file() and file_path.name.lower() == filename.lower():
+                return file_path
+                
     except Exception as e:
         log.error("Error finding file %s: %s", filename, e)
     return None
 
 def find_upload_folder(upload_dir: Path, folder_name: str) -> Optional[str]:
-    """Find a folder in upload directory (case-insensitive)"""
+    """Find a folder in upload or download directory (case-insensitive)"""
     try:
+        is_download = folder_name.endswith("-d")
+        
+        if is_download:
+            # Download folder
+            actual_folder_name = folder_name[:-2]  # Remove "-d"
+            base_dir = DOWNLOAD_DIR
+        else:
+            # Upload folder
+            actual_folder_name = folder_name
+            base_dir = upload_dir
+        
         # Handle root folder
-        if folder_name.lower() in [".", "root", ""]:
-            return "."
+        if actual_folder_name.lower() in [".", "root", ""]:
+            return ".-d" if is_download else "."
             
         # Try exact match first
-        candidate = upload_dir / folder_name
+        candidate = base_dir / actual_folder_name
         if candidate.exists() and candidate.is_dir():
-            return folder_name
+            return folder_name  # Return original name with -d suffix if applicable
         
         # Try case-insensitive search
-        for item in upload_dir.rglob("*"):
+        for item in base_dir.rglob("*"):
             if item.is_dir():
-                rel_path = item.relative_to(upload_dir)
-                if str(rel_path).lower() == folder_name.lower():
-                    return str(rel_path)
+                rel_path = item.relative_to(base_dir)
+                if str(rel_path).lower() == actual_folder_name.lower():
+                    return str(rel_path) + ("-d" if is_download else "")
+                    
     except Exception as e:
         log.error("Error finding folder %s: %s", folder_name, e)
     return None
@@ -565,23 +629,43 @@ async def handle_folders_command(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text("📁 No folders available.")
         return
     
+    # Separate upload and download folders
+    upload_folders = [f for f in folders if not f.endswith("-d")]
+    download_folders = [f for f in folders if f.endswith("-d")]
+    
     message = "📁 <b>Available folders:</b>\n\n"
     
-    for folder in folders[:20]:  # Limit to avoid too long message
-        if folder == ".":
-            # Count files in root
-            files_in_root = get_files_in_folder(UPLOAD_DIR, ".")
-            message += f"📂 <code>. (root)</code> ({len(files_in_root)} files)\n"
-        else:
-            # Count files in subfolder  
-            files_in_folder = get_files_in_folder(UPLOAD_DIR, folder)
-            message += f"📂 <code>{folder}</code> ({len(files_in_folder)} files)\n"
+    # Show upload folders
+    if upload_folders:
+        message += "📤 <b>Upload folders:</b>\n"
+        for folder in upload_folders[:10]:  # Limit to avoid too long message
+            if folder == ".":
+                files_count = len(get_files_in_folder(UPLOAD_DIR, "."))
+                message += f"📂 <code>. (root)</code> ({files_count} files)\n"
+            else:
+                files_count = len(get_files_in_folder(UPLOAD_DIR, folder))
+                message += f"📂 <code>{folder}</code> ({files_count} files)\n"
+        message += "\n"
     
-    if len(folders) > 20:
-        message += f"\n<i>... and {len(folders) - 20} more folders</i>"
+    # Show download folders  
+    if download_folders:
+        message += "📥 <b>Download folders:</b>\n"
+        for folder in download_folders[:10]:  # Limit to avoid too long message
+            if folder == ".-d":
+                files_count = len(get_files_in_folder(UPLOAD_DIR, ".-d"))
+                message += f"📂 <code>.-d (root-download)</code> ({files_count} files)\n"
+            else:
+                files_count = len(get_files_in_folder(UPLOAD_DIR, folder))
+                folder_display = folder[:-2]  # Remove -d for display
+                message += f"📂 <code>{folder}</code> ({folder_display}-download, {files_count} files)\n"
     
-    message += "\n💡 Use <code>/send foldername</code> to send all files in a folder"
-    message += "\n💡 Use <code>/send .</code> to send all files in root folder"
+    total_folders = len(upload_folders) + len(download_folders)
+    if total_folders > 20:
+        message += f"\n<i>... and {total_folders - 20} more folders</i>"
+    
+    message += "\n💡 Use <code>/send foldername</code> to send upload folder files"
+    message += "\n💡 Use <code>/send foldername-d</code> to send download folder files"
+    message += "\n💡 Use <code>/send .</code> for root upload, <code>/send .-d</code> for root download"
     
     await update.message.reply_text(message, parse_mode=ParseMode.HTML)
 
