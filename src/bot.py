@@ -1318,27 +1318,27 @@ def build_app() -> Application:
     app.add_error_handler(error_handler)
     return app
 
-async def main_async() -> None:
+def main() -> None:
     app = build_app()
     
-    # Set up bot commands first
-    await setup_bot_commands(app)
+    # Set up bot commands in a sync way - this will be called when the bot starts
+    async def post_init(application: Application) -> None:
+        await setup_bot_commands(application)
+    
+    # Add the post_init callback
+    app.post_init = post_init
     
     log.info("Starting bot with long polling. Allowed user id: %s. Download dir: %s",
              ALLOWED_TELEGRAM_USER_ID, DOWNLOAD_DIR)
     
     # Long polling; restrict updates to messages and callback queries, drop pending to avoid backlog
-    await app.run_polling(
+    app.run_polling(
         allowed_updates=[constants.UpdateType.MESSAGE, constants.UpdateType.CALLBACK_QUERY],
         drop_pending_updates=True,
         poll_interval=1.5,
         timeout=30,
         stop_signals=(signal.SIGINT, signal.SIGTERM),
     )
-
-def main() -> None:
-    # Run the async main function
-    asyncio.run(main_async())
 
 if __name__ == "__main__":
     main()
