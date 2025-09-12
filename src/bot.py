@@ -10,13 +10,14 @@ import mimetypes
 import signal
 
 from dotenv import load_dotenv
-from telegram import Update, constants, File
+from telegram import Update, constants, File, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import (
     Application,
     ApplicationBuilder,
     ContextTypes,
     MessageHandler,
     CommandHandler,  # added
+    CallbackQueryHandler,  # added for inline keyboards
     filters,
 )
 from telegram.constants import ParseMode
@@ -289,6 +290,141 @@ def format_file_size(size: int) -> str:
         size /= 1024
     return f"{size:.1f} TB"
 
+async def setup_bot_commands(application: Application) -> None:
+    """Set up bot commands that appear in Telegram's native command menu"""
+    commands = [
+        BotCommand("start", "🏠 Show welcome message and main menu"),
+        BotCommand("menu", "📋 Show interactive main menu"),
+        BotCommand("list", "📄 List all available files to send"),
+        BotCommand("folders", "📁 List all available folders"),
+        BotCommand("listfolder", "📂 List files in a specific folder"),
+        BotCommand("send", "📤 Send a file or folder to Telegram"),
+    ]
+    
+    try:
+        await application.bot.set_my_commands(commands)
+        log.info("Bot commands set successfully")
+    except Exception as e:
+        log.error("Failed to set bot commands: %s", e)
+
+def create_main_menu_keyboard() -> InlineKeyboardMarkup:
+    """Create the main menu inline keyboard"""
+    keyboard = [
+        [
+            InlineKeyboardButton("📄 List Files", callback_data="cmd_list"),
+            InlineKeyboardButton("📁 List Folders", callback_data="cmd_folders")
+        ],
+        [
+            InlineKeyboardButton("📤 Send File", callback_data="cmd_send_file"),
+            InlineKeyboardButton("📂 Send Folder", callback_data="cmd_send_folder")
+        ],
+        [
+            InlineKeyboardButton("🔄 Refresh Menu", callback_data="cmd_menu"),
+            InlineKeyboardButton("ℹ️ Help", callback_data="cmd_help")
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def create_files_menu_keyboard(files: List[Tuple[str, int]], page: int = 0, per_page: int = 8) -> InlineKeyboardMarkup:
+    """Create inline keyboard for file selection"""
+    keyboard = []
+    
+    start_idx = page * per_page
+    end_idx = min(start_idx + per_page, len(files))
+    
+    # Add file buttons (2 per row)
+    for i in range(start_idx, end_idx, 2):
+        row = []
+        # First file in row
+        filename, size = files[i]
+        size_str = format_file_size(size)
+        # Truncate long filenames for button display
+        display_name = filename[:25] + "..." if len(filename) > 25 else filename
+        row.append(InlineKeyboardButton(
+            f"📄 {display_name} ({size_str})",
+            callback_data=f"send_file:{filename}"
+        ))
+        
+        # Second file in row (if exists)
+        if i + 1 < end_idx:
+            filename2, size2 = files[i + 1]
+            size_str2 = format_file_size(size2)
+            display_name2 = filename2[:25] + "..." if len(filename2) > 25 else filename2
+            row.append(InlineKeyboardButton(
+                f"📄 {display_name2} ({size_str2})",
+                callback_data=f"send_file:{filename2}"
+            ))
+        
+        keyboard.append(row)
+    
+    # Add navigation buttons
+    nav_row = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"files_page:{page-1}"))
+    if end_idx < len(files):
+        nav_row.append(InlineKeyboardButton("➡️ Next", callback_data=f"files_page:{page+1}"))
+    
+    if nav_row:
+        keyboard.append(nav_row)
+    
+    # Add back to menu button
+    keyboard.append([InlineKeyboardButton("🔙 Back to Menu", callback_data="cmd_menu")])
+    
+    return InlineKeyboardMarkup(keyboard)
+
+def create_folders_menu_keyboard(folders: List[str], page: int = 0, per_page: int = 8) -> InlineKeyboardMarkup:
+    """Create inline keyboard for folder selection"""
+    keyboard = []
+    
+    start_idx = page * per_page
+    end_idx = min(start_idx + per_page, len(folders))
+    
+    # Add folder buttons (2 per row)
+    for i in range(start_idx, end_idx, 2):
+        row = []
+        # First folder in row
+        folder = folders[i]
+        display_name = "🏠 Root" if folder == "." else f"📁 {folder}"
+        if folder.endswith("-d"):
+            actual_name = folder[:-2]
+            display_name = f"📥 {actual_name}" if actual_name != "." else "📥 Root-Downloads"
+        
+        # Truncate long folder names
+        if len(display_name) > 30:
+            display_name = display_name[:27] + "..."
+            
+        row.append(InlineKeyboardButton(display_name, callback_data=f"send_folder:{folder}"))
+        
+        # Second folder in row (if exists)
+        if i + 1 < end_idx:
+            folder2 = folders[i + 1]
+            display_name2 = "🏠 Root" if folder2 == "." else f"📁 {folder2}"
+            if folder2.endswith("-d"):
+                actual_name2 = folder2[:-2]
+                display_name2 = f"📥 {actual_name2}" if actual_name2 != "." else "📥 Root-Downloads"
+                
+            if len(display_name2) > 30:
+                display_name2 = display_name2[:27] + "..."
+                
+            row.append(InlineKeyboardButton(display_name2, callback_data=f"send_folder:{folder2}"))
+        
+        keyboard.append(row)
+    
+    # Add navigation buttons
+    nav_row = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"folders_page:{page-1}"))
+    if end_idx < len(folders):
+        nav_row.append(InlineKeyboardButton("➡️ Next", callback_data=f"folders_page:{page+1}"))
+    
+    if nav_row:
+        keyboard.append(nav_row)
+    
+    # Add back to menu button
+    keyboard.append([InlineKeyboardButton("🔙 Back to Menu", callback_data="cmd_menu")])
+    
+    return InlineKeyboardMarkup(keyboard)
+
 async def send_file_to_telegram(context: ContextTypes.DEFAULT_TYPE, 
                                file_path: Path, 
                                chat_id: int) -> Tuple[bool, str]:
@@ -459,8 +595,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except:
         upload_count = "?"
     
+    keyboard = create_main_menu_keyboard()
+    
     await update.message.reply_text(
-        "🤖 <b>Achiko</b>\n\n"
+        "🤖 <b>Achiko Bot</b>\n\n"
         "👋 Hey there! I can help you transfer files both ways:\n\n"
         
         "📥 <b>DOWNLOAD FROM TELEGRAM:</b>\n"
@@ -468,31 +606,51 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"   • I'll save them to: <code>{DOWNLOAD_DIR}</code>\n\n"
         
         "📤 <b>SEND TO TELEGRAM:</b>\n"
-        f"   • <code>/list</code> - Show available files ({upload_count} files ready)\n"
-        "   • <code>/folders</code> - Show available folders\n"
-        "   • <code>/send filename.ext</code> - Send a specific file\n"
-        "   • <code>/send foldername</code> - Send all files in a folder\n"
+        f"   • Use the menu buttons below or commands ({upload_count} files ready)\n"
         f"   • Files are loaded from: <code>{UPLOAD_DIR}</code>\n\n"
         
-        "🎯 <b>AVAILABLE COMMANDS:</b>\n"
-        "   • <code>/start</code> - Show this help message\n"
-        "   • <code>/list</code> - List all files available to send\n"
-        "   • <code>/folders</code> - List all folders available to send\n"
-        "   • <code>/listfolder &lt;foldername&gt;</code> - List files in a specific folder\n"
-        "   • <code>/send &lt;filename&gt;</code> - Send a file from PC to Telegram\n"
-        "   • <code>/send &lt;foldername&gt;</code> - Send all files in a folder\n\n"
-        
-        "📋 <b>EXAMPLES:</b>\n"
-        "   • <code>/listfolder photos</code> - List files in photos folder\n"
-        "   • <code>/listfolder photos-d</code> - List files in photos download folder\n"
-        "   • <code>/send document.pdf</code> - Send single file\n"
-        "   • <code>/send photos</code> - Send all files in photos folder\n"
-        "   • <code>/send .</code> - Send all files in root folder\n"
-        "   • <code>/send music/rock</code> - Send all files in music/rock folder\n\n"
+        "🎯 <b>QUICK ACCESS:</b>\n"
+        "   • Use the buttons below for easy navigation\n"
+        "   • Or type <code>/</code> to see all available commands\n"
+        "   • Type <code>/menu</code> anytime to return to this menu\n\n"
         
         "🔒 <b>Security:</b> Only you can use this bot!\n"
         "📁 <b>File limit:</b> Max 50MB per file (Telegram limit)",
         
+        reply_markup=keyboard,
+        parse_mode=ParseMode.HTML
+    )
+
+async def handle_menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /menu command - show interactive main menu"""
+    if not user_is_allowed(update) or not is_private_chat(update):
+        return
+    
+    try:
+        upload_files = get_upload_files(UPLOAD_DIR)
+        upload_count = len(upload_files)
+        
+        upload_folders = get_upload_folders(UPLOAD_DIR)
+        folder_count = len(upload_folders)
+    except:
+        upload_count = "?"
+        folder_count = "?"
+    
+    keyboard = create_main_menu_keyboard()
+    
+    await update.message.reply_text(
+        "📋 <b>Main Menu</b>\n\n"
+        f"📊 <b>Statistics:</b>\n"
+        f"   • {upload_count} files available\n"
+        f"   • {folder_count} folders available\n\n"
+        
+        "🎯 <b>Quick Actions:</b>\n"
+        "   • Click any button below for instant action\n"
+        "   • Or use commands: type <code>/</code> for command list\n\n"
+        
+        "📥 <b>Send me media</b> to download it automatically!",
+        
+        reply_markup=keyboard,
         parse_mode=ParseMode.HTML
     )
 
@@ -748,6 +906,360 @@ async def handle_listfolder_command(update: Update, context: ContextTypes.DEFAUL
     
     await update.message.reply_text(message, parse_mode=ParseMode.HTML)
 
+async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle inline keyboard button clicks"""
+    if not user_is_allowed(update) or not is_private_chat(update):
+        return
+    
+    query = update.callback_query
+    if not query or not query.data:
+        return
+        
+    await query.answer()  # Acknowledge the callback query
+    
+    data = query.data
+    
+    try:
+        # Main menu commands
+        if data == "cmd_menu":
+            # Show main menu
+            try:
+                upload_files = get_upload_files(UPLOAD_DIR)
+                upload_count = len(upload_files)
+                upload_folders = get_upload_folders(UPLOAD_DIR)
+                folder_count = len(upload_folders)
+            except:
+                upload_count = "?"
+                folder_count = "?"
+            
+            keyboard = create_main_menu_keyboard()
+            await query.edit_message_text(
+                "📋 <b>Main Menu</b>\n\n"
+                f"📊 <b>Statistics:</b>\n"
+                f"   • {upload_count} files available\n"
+                f"   • {folder_count} folders available\n\n"
+                
+                "🎯 <b>Quick Actions:</b>\n"
+                "   • Click any button below for instant action\n"
+                "   • Or use commands: type <code>/</code> for command list\n\n"
+                
+                "📥 <b>Send me media</b> to download it automatically!",
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML
+            )
+            
+        elif data == "cmd_list":
+            # Show files list with inline keyboard
+            files = get_upload_files(UPLOAD_DIR)
+            
+            if not files:
+                keyboard = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔙 Back to Menu", callback_data="cmd_menu")
+                ]])
+                await query.edit_message_text(
+                    "📁 <b>No files available</b>\n\n"
+                    "Send me some files first or check your upload directory!",
+                    reply_markup=keyboard,
+                    parse_mode=ParseMode.HTML
+                )
+                return
+            
+            total_size = sum(size for _, size in files)
+            total_size_str = format_file_size(total_size)
+            
+            keyboard = create_files_menu_keyboard(files)
+            await query.edit_message_text(
+                f"📄 <b>Available Files</b>\n\n"
+                f"📊 <b>Total:</b> {len(files)} files ({total_size_str})\n\n"
+                "🎯 <b>Click on a file to send it instantly:</b>",
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML
+            )
+            
+        elif data == "cmd_folders":
+            # Show folders list with inline keyboard
+            folders = get_upload_folders(UPLOAD_DIR)
+            
+            if not folders:
+                keyboard = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔙 Back to Menu", callback_data="cmd_menu")
+                ]])
+                await query.edit_message_text(
+                    "📁 <b>No folders available</b>\n\n"
+                    "Create some folders in your upload/download directories first!",
+                    reply_markup=keyboard,
+                    parse_mode=ParseMode.HTML
+                )
+                return
+            
+            keyboard = create_folders_menu_keyboard(folders)
+            await query.edit_message_text(
+                f"📁 <b>Available Folders</b>\n\n"
+                f"📊 <b>Total:</b> {len(folders)} folders\n\n"
+                "🎯 <b>Click on a folder to send all its files:</b>",
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML
+            )
+            
+        elif data == "cmd_send_file":
+            # Show file selection menu
+            files = get_upload_files(UPLOAD_DIR)
+            
+            if not files:
+                keyboard = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔙 Back to Menu", callback_data="cmd_menu")
+                ]])
+                await query.edit_message_text(
+                    "📁 <b>No files available</b>\n\n"
+                    "Send me some files first or check your upload directory!\n\n"
+                    "💡 You can also use: <code>/send filename.ext</code>",
+                    reply_markup=keyboard,
+                    parse_mode=ParseMode.HTML
+                )
+                return
+                
+            keyboard = create_files_menu_keyboard(files)
+            await query.edit_message_text(
+                f"📤 <b>Send File</b>\n\n"
+                f"📊 <b>Available:</b> {len(files)} files\n\n"
+                "🎯 <b>Select a file to send:</b>",
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML
+            )
+            
+        elif data == "cmd_send_folder":
+            # Show folder selection menu
+            folders = get_upload_folders(UPLOAD_DIR)
+            
+            if not folders:
+                keyboard = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔙 Back to Menu", callback_data="cmd_menu")
+                ]])
+                await query.edit_message_text(
+                    "📁 <b>No folders available</b>\n\n"
+                    "Create some folders in your directories first!\n\n"
+                    "💡 You can also use: <code>/send foldername</code>",
+                    reply_markup=keyboard,
+                    parse_mode=ParseMode.HTML
+                )
+                return
+                
+            keyboard = create_folders_menu_keyboard(folders)
+            await query.edit_message_text(
+                f"📂 <b>Send Folder</b>\n\n"
+                f"📊 <b>Available:</b> {len(folders)} folders\n\n"
+                "🎯 <b>Select a folder to send all its files:</b>",
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML
+            )
+            
+        elif data == "cmd_help":
+            # Show help information
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Back to Menu", callback_data="cmd_menu")
+            ]])
+            await query.edit_message_text(
+                "ℹ️ <b>Help & Instructions</b>\n\n"
+                
+                "📥 <b>Download from Telegram:</b>\n"
+                "   • Send any media to me\n"
+                "   • I'll save it automatically\n\n"
+                
+                "📤 <b>Send to Telegram:</b>\n"
+                "   • Use menu buttons for easy access\n"
+                "   • Or use commands like <code>/send filename</code>\n\n"
+                
+                "🎯 <b>Available Commands:</b>\n"
+                "   • <code>/menu</code> - Show this interactive menu\n"
+                "   • <code>/list</code> - List all files\n"
+                "   • <code>/folders</code> - List all folders\n"
+                "   • <code>/send &lt;name&gt;</code> - Send file or folder\n"
+                "   • <code>/listfolder &lt;name&gt;</code> - List folder contents\n\n"
+                
+                "💡 <b>Tips:</b>\n"
+                "   • Type <code>/</code> to see all commands\n"
+                "   • Folders ending with <code>-d</code> are from downloads\n"
+                "   • Max file size: 50MB (Telegram limit)",
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML
+            )
+            
+        # Handle pagination for files
+        elif data.startswith("files_page:"):
+            page = int(data.split(":")[1])
+            files = get_upload_files(UPLOAD_DIR)
+            keyboard = create_files_menu_keyboard(files, page)
+            total_size = sum(size for _, size in files)
+            total_size_str = format_file_size(total_size)
+            
+            await query.edit_message_text(
+                f"📄 <b>Available Files</b> (Page {page + 1})\n\n"
+                f"📊 <b>Total:</b> {len(files)} files ({total_size_str})\n\n"
+                "🎯 <b>Click on a file to send it instantly:</b>",
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML
+            )
+            
+        # Handle pagination for folders
+        elif data.startswith("folders_page:"):
+            page = int(data.split(":")[1])
+            folders = get_upload_folders(UPLOAD_DIR)
+            keyboard = create_folders_menu_keyboard(folders, page)
+            
+            await query.edit_message_text(
+                f"📁 <b>Available Folders</b> (Page {page + 1})\n\n"
+                f"📊 <b>Total:</b> {len(folders)} folders\n\n"
+                "🎯 <b>Click on a folder to send all its files:</b>",
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML
+            )
+            
+        # Handle file sending
+        elif data.startswith("send_file:"):
+            filename = data[10:]  # Remove "send_file:" prefix
+            
+            # Find and send the file
+            file_path = find_upload_file(UPLOAD_DIR, filename)
+            
+            if not file_path:
+                await query.edit_message_text(
+                    f"❌ <b>File not found:</b> <code>{filename}</code>\n\n"
+                    "The file may have been moved or deleted.",
+                    parse_mode=ParseMode.HTML
+                )
+                return
+            
+            # Update message to show sending status
+            await query.edit_message_text(
+                f"📤 <b>Sending file...</b>\n\n"
+                f"📄 File: <code>{filename}</code>\n"
+                f"📏 Size: {format_file_size(file_path.stat().st_size)}",
+                parse_mode=ParseMode.HTML
+            )
+            
+            # Send the file
+            success, message = await send_file_to_telegram(context, file_path, query.message.chat.id)
+            
+            # Create back button
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("📄 Back to Files", callback_data="cmd_list"),
+                InlineKeyboardButton("🔙 Main Menu", callback_data="cmd_menu")
+            ]])
+            
+            if success:
+                await query.edit_message_text(
+                    f"✅ <b>File sent successfully!</b>\n\n"
+                    f"📄 {filename}\n\n"
+                    f"{message}",
+                    reply_markup=keyboard,
+                    parse_mode=ParseMode.HTML
+                )
+            else:
+                await query.edit_message_text(
+                    f"❌ <b>Failed to send file</b>\n\n"
+                    f"📄 {filename}\n\n"
+                    f"Error: {message}",
+                    reply_markup=keyboard,
+                    parse_mode=ParseMode.HTML
+                )
+                
+        # Handle folder sending
+        elif data.startswith("send_folder:"):
+            folder_name = data[12:]  # Remove "send_folder:" prefix
+            
+            # Find folder and get files
+            folder_path = find_upload_folder(UPLOAD_DIR, folder_name)
+            
+            if not folder_path:
+                await query.edit_message_text(
+                    f"❌ <b>Folder not found:</b> <code>{folder_name}</code>\n\n"
+                    "The folder may have been moved or deleted.",
+                    parse_mode=ParseMode.HTML
+                )
+                return
+            
+            files_in_folder = get_files_in_folder(UPLOAD_DIR, folder_path)
+            
+            if not files_in_folder:
+                keyboard = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("📁 Back to Folders", callback_data="cmd_folders"),
+                    InlineKeyboardButton("🔙 Main Menu", callback_data="cmd_menu")
+                ]])
+                await query.edit_message_text(
+                    f"📁 <b>Folder is empty:</b> <code>{folder_name}</code>\n\n"
+                    "No files to send.",
+                    reply_markup=keyboard,
+                    parse_mode=ParseMode.HTML
+                )
+                return
+            
+            # Update message to show sending status
+            folder_display = "root" if folder_path == "." else folder_path
+            await query.edit_message_text(
+                f"📂 <b>Sending folder...</b>\n\n"
+                f"📁 Folder: <code>{folder_display}</code>\n"
+                f"📊 Files: {len(files_in_folder)} files\n\n"
+                "⏳ Please wait...",
+                parse_mode=ParseMode.HTML
+            )
+            
+            # Send all files in the folder
+            sent_count = 0
+            failed_count = 0
+            failed_files = []
+            
+            for file_path in files_in_folder:
+                success, message = await send_file_to_telegram(context, file_path, query.message.chat.id)
+                if success:
+                    sent_count += 1
+                else:
+                    failed_count += 1
+                    failed_files.append(file_path.name)
+                    log.error("Failed to send %s: %s", file_path.name, message)
+                
+                # Small delay to avoid rate limits
+                await asyncio.sleep(0.5)
+            
+            # Create back button
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("📁 Back to Folders", callback_data="cmd_folders"),
+                InlineKeyboardButton("🔙 Main Menu", callback_data="cmd_menu")
+            ]])
+            
+            # Send summary
+            summary = f"📂 <b>Folder send complete!</b>\n\n"
+            summary += f"📁 Folder: <code>{folder_display}</code>\n"
+            summary += f"✅ Successfully sent: {sent_count} files\n"
+            if failed_count > 0:
+                summary += f"❌ Failed: {failed_count} files\n"
+                if failed_files:
+                    summary += f"Failed files: {', '.join(failed_files[:3])}"
+                    if len(failed_files) > 3:
+                        summary += f" and {len(failed_files) - 3} more..."
+            
+            await query.edit_message_text(
+                summary,
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML
+            )
+            
+    except Exception as e:
+        log.error("Error handling callback query %s: %s", data, str(e))
+        # Try to show an error message
+        try:
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Back to Menu", callback_data="cmd_menu")
+            ]])
+            await query.edit_message_text(
+                f"❌ <b>Error occurred</b>\n\n"
+                f"Something went wrong while processing your request.\n\n"
+                f"Error: {str(e)}",
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML
+            )
+        except:
+            pass  # If we can't even show the error message, just log it
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     log.exception("Error handling update: %s", context.error)
 
@@ -757,17 +1269,31 @@ def build_app() -> Application:
         .token(BOT_TOKEN)
         .build()
     )
+    
+    # Add callback query handler for inline keyboards (must be added first)
+    app.add_handler(CallbackQueryHandler(
+        handle_callback_query,
+        filters=filters.ChatType.PRIVATE & filters.User(ALLOWED_TELEGRAM_USER_ID)
+    ))
+    
     app.add_handler(MessageHandler(
         filters.ChatType.PRIVATE & filters.User(ALLOWED_TELEGRAM_USER_ID) & MEDIA_FILTER,
         handle_media
     ))
-    # Register /start for the allowed user in a private chat
+    
+    # Register command handlers for the allowed user in private chat
     app.add_handler(CommandHandler(
         "start",
         start,
         filters=filters.ChatType.PRIVATE & filters.User(ALLOWED_TELEGRAM_USER_ID)
     ))
-    # Add upload commands
+    
+    app.add_handler(CommandHandler(
+        "menu", 
+        handle_menu_command,
+        filters=filters.ChatType.PRIVATE & filters.User(ALLOWED_TELEGRAM_USER_ID)
+    ))
+    
     app.add_handler(CommandHandler(
         "list",
         handle_list_command,
@@ -785,26 +1311,37 @@ def build_app() -> Application:
         handle_folders_command,
         filters=filters.ChatType.PRIVATE & filters.User(ALLOWED_TELEGRAM_USER_ID)
     ))
+    
     app.add_handler(CommandHandler(
         "listfolder",
         handle_listfolder_command,
         filters=filters.ChatType.PRIVATE & filters.User(ALLOWED_TELEGRAM_USER_ID)
     ))
+    
     app.add_error_handler(error_handler)
     return app
 
-def main() -> None:
+async def main_async() -> None:
     app = build_app()
+    
+    # Set up bot commands first
+    await setup_bot_commands(app)
+    
     log.info("Starting bot with long polling. Allowed user id: %s. Download dir: %s",
              ALLOWED_TELEGRAM_USER_ID, DOWNLOAD_DIR)
-    # Long polling; restrict updates to messages only and drop pending to avoid backlog
-    app.run_polling(
-        allowed_updates=[constants.UpdateType.MESSAGE],
+    
+    # Long polling; restrict updates to messages and callback queries, drop pending to avoid backlog
+    await app.run_polling(
+        allowed_updates=[constants.UpdateType.MESSAGE, constants.UpdateType.CALLBACK_QUERY],
         drop_pending_updates=True,
         poll_interval=1.5,
         timeout=30,
         stop_signals=(signal.SIGINT, signal.SIGTERM),
     )
+
+def main() -> None:
+    # Run the async main function
+    asyncio.run(main_async())
 
 if __name__ == "__main__":
     main()
