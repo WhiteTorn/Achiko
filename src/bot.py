@@ -478,10 +478,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "   • <code>/start</code> - Show this help message\n"
         "   • <code>/list</code> - List all files available to send\n"
         "   • <code>/folders</code> - List all folders available to send\n"
+        "   • <code>/listfolder &lt;foldername&gt;</code> - List files in a specific folder\n"
         "   • <code>/send &lt;filename&gt;</code> - Send a file from PC to Telegram\n"
         "   • <code>/send &lt;foldername&gt;</code> - Send all files in a folder\n\n"
         
         "📋 <b>EXAMPLES:</b>\n"
+        "   • <code>/listfolder photos</code> - List files in photos folder\n"
+        "   • <code>/listfolder photos-d</code> - List files in photos download folder\n"
         "   • <code>/send document.pdf</code> - Send single file\n"
         "   • <code>/send photos</code> - Send all files in photos folder\n"
         "   • <code>/send .</code> - Send all files in root folder\n"
@@ -666,6 +669,84 @@ async def handle_folders_command(update: Update, context: ContextTypes.DEFAULT_T
     
     await update.message.reply_text(message, parse_mode=ParseMode.HTML)
 
+async def handle_listfolder_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /listfolder command - show files in a specific folder"""
+    if not user_is_allowed(update) or not is_private_chat(update):
+        return
+    
+    if not context.args:
+        await update.message.reply_text(
+            "❗ Please specify a folder name.\n\n"
+            "Usage: <code>/listfolder foldername</code>\n"
+            "Examples:\n"
+            "   • <code>/listfolder photos</code> - List files in photos folder\n"
+            "   • <code>/listfolder photos-d</code> - List files in photos download folder\n"
+            "   • <code>/listfolder .</code> - List files in root upload folder\n"
+            "   • <code>/listfolder .-d</code> - List files in root download folder\n\n"
+            "Use <code>/folders</code> to see available folders.",
+            parse_mode=ParseMode.HTML
+        )
+        return
+    
+    folder_name = " ".join(context.args)  # Handle folder names with spaces
+    
+    # Check if folder exists
+    folder_path = find_upload_folder(UPLOAD_DIR, folder_name)
+    
+    if folder_path is None:
+        await update.message.reply_text(
+            f"❌ Folder not found: <code>{folder_name}</code>\n\n"
+            f"Use <code>/folders</code> to see available folders.",
+            parse_mode=ParseMode.HTML
+        )
+        return
+    
+    # Get files in the folder
+    files_in_folder = get_files_in_folder(UPLOAD_DIR, folder_path)
+    
+    if not files_in_folder:
+        folder_type = "download" if folder_path.endswith("-d") else "upload"
+        folder_display = folder_path[:-2] if folder_path.endswith("-d") else folder_path
+        folder_display = "root" if folder_display == "." else folder_display
+        
+        await update.message.reply_text(
+            f"📁 Folder <code>{folder_name}</code> is empty.\n"
+            f"📂 Type: {folder_type}\n"
+            f"📍 Path: {folder_display}",
+            parse_mode=ParseMode.HTML
+        )
+        return
+    
+    # Calculate total size
+    total_size = sum(f.stat().st_size for f in files_in_folder)
+    total_size_str = format_file_size(total_size)
+    
+    # Determine folder type and display name
+    is_download = folder_path.endswith("-d")
+    folder_type = "📥 Download" if is_download else "📤 Upload"
+    folder_display = folder_path[:-2] if is_download else folder_path
+    folder_display = "root" if folder_display == "." else folder_display
+    
+    # Format file list
+    file_list = []
+    for file_path in files_in_folder[:30]:  # Limit to 30 files to avoid too long message
+        size = file_path.stat().st_size
+        size_str = format_file_size(size)
+        filename = file_path.name
+        file_list.append(f"📄 <code>{filename}</code> ({size_str})")
+    
+    # Build message
+    message = f"{folder_type} folder: <b>{folder_display}</b>\n"
+    message += f"📊 <b>Total:</b> {len(files_in_folder)} files ({total_size_str})\n\n"
+    message += "📁 <b>Files in this folder:</b>\n\n" + "\n".join(file_list)
+    
+    if len(files_in_folder) > 30:
+        message += f"\n\n<i>... and {len(files_in_folder) - 30} more files</i>"
+    
+    message += f"\n\n💡 Use <code>/send {folder_name}</code> to send all files in this folder"
+    message += f"\n💡 Use <code>/send filename</code> to send individual files"
+    
+    await update.message.reply_text(message, parse_mode=ParseMode.HTML)
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     log.exception("Error handling update: %s", context.error)
@@ -702,6 +783,11 @@ def build_app() -> Application:
     app.add_handler(CommandHandler(
         "folders",
         handle_folders_command,
+        filters=filters.ChatType.PRIVATE & filters.User(ALLOWED_TELEGRAM_USER_ID)
+    ))
+    app.add_handler(CommandHandler(
+        "listfolder",
+        handle_listfolder_command,
         filters=filters.ChatType.PRIVATE & filters.User(ALLOWED_TELEGRAM_USER_ID)
     ))
     app.add_error_handler(error_handler)
