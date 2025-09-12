@@ -356,10 +356,15 @@ async def handle_list_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     
     files = get_upload_files(UPLOAD_DIR)
+    total_count = len(files)
     
     if not files:
         await update.message.reply_text("📁 No files available to send.")
         return
+    
+    # Calculate total size of all files
+    total_size = sum(size for _, size in files)
+    total_size_str = format_file_size(total_size)
     
     # Format file list
     file_list = []
@@ -367,7 +372,8 @@ async def handle_list_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         size_str = format_file_size(size)
         file_list.append(f"📄 <code>{filename}</code> ({size_str})")
     
-    message = "📁 <b>Available files to send:</b>\n\n" + "\n".join(file_list)
+    message = f"📊 <b>Total:</b> {total_count} files ({total_size_str})\n"
+    message += "📁 <b>Available files to send:</b>\n\n" + "\n".join(file_list)
     
     if len(files) > 20:
         message += f"\n\n<i>... and {len(files) - 20} more files</i>"
