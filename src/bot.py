@@ -393,16 +393,16 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             ok, err = await download_file(tg_file, dest)
             if ok:
                 await msg.reply_text(
-                    f"✅ Download complete. Saved as: <code>{final_name}</code>\n"
+                    f"✅ Download complete. Saved as: <code>{final_name}</code>\n\n"
                     f"📁 Path: <code>{dest}</code>",
                     parse_mode=ParseMode.HTML
                 )
                 log.info("Downloaded %s -> %s", file_id, dest)
             else:
-                await msg.reply_text(f"❌ Download failed: {err}")
+                await msg.reply_text(f"❌ Download failed: {err}", parse_mode=ParseMode.HTML)
                 log.error("Download failed for %s: %s", file_id, err)
         except Exception as e:
-            await msg.reply_text(f"❌ Download failed: {e}")
+            await msg.reply_text(f"❌ Download failed: {e}", parse_mode=ParseMode.HTML)
             log.exception("Unhandled error while processing media: %s", e)
 
     # Photos are a list of sizes; pick the largest
