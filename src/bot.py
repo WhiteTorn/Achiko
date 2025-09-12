@@ -6,6 +6,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple, List
+import mimetypes
 import signal
 
 from dotenv import load_dotenv
