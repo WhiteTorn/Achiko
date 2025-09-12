@@ -1271,10 +1271,7 @@ def build_app() -> Application:
     )
     
     # Add callback query handler for inline keyboards (must be added first)
-    app.add_handler(CallbackQueryHandler(
-        handle_callback_query,
-        filters=filters.ChatType.PRIVATE & filters.User(ALLOWED_TELEGRAM_USER_ID)
-    ))
+    app.add_handler(CallbackQueryHandler(handle_callback_query))
     
     app.add_handler(MessageHandler(
         filters.ChatType.PRIVATE & filters.User(ALLOWED_TELEGRAM_USER_ID) & MEDIA_FILTER,
