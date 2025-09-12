@@ -195,6 +195,28 @@ def find_upload_file(upload_dir: Path, filename: str) -> Optional[Path]:
         log.error("Error finding file %s: %s", filename, e)
     return None
 
+def find_upload_folder(upload_dir: Path, folder_name: str) -> Optional[str]:
+    """Find a folder in upload directory (case-insensitive)"""
+    try:
+        # Handle root folder
+        if folder_name.lower() in [".", "root", ""]:
+            return "."
+            
+        # Try exact match first
+        candidate = upload_dir / folder_name
+        if candidate.exists() and candidate.is_dir():
+            return folder_name
+        
+        # Try case-insensitive search
+        for item in upload_dir.rglob("*"):
+            if item.is_dir():
+                rel_path = item.relative_to(upload_dir)
+                if str(rel_path).lower() == folder_name.lower():
+                    return str(rel_path)
+    except Exception as e:
+        log.error("Error finding folder %s: %s", folder_name, e)
+    return None
+
 def format_file_size(size: int) -> str:
     """Format file size in human-readable format"""
     for unit in ['B', 'KB', 'MB', 'GB']:
