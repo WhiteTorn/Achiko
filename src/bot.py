@@ -292,7 +292,7 @@ def format_file_size(size: int) -> str:
 async def send_file_to_telegram(context: ContextTypes.DEFAULT_TYPE, 
                                file_path: Path, 
                                chat_id: int) -> Tuple[bool, str]:
-    """Send a file to Telegram chat"""
+    """Send a file to Telegram chat as document (uncompressed)"""
     try:
         # Initialize mimetypes if needed
         if not mimetypes.inited:
@@ -321,34 +321,26 @@ async def send_file_to_telegram(context: ContextTypes.DEFAULT_TYPE,
         
         with open(file_path, 'rb') as f:
             filename = file_path.name
+            file_size_str = format_file_size(file_size)
             
-            # Send based on file type
+            # Always send as document to preserve original quality (no compression)
+            # Create caption with file info and appropriate emoji based on file type
             if mime_type and mime_type.startswith('image/'):
-                await context.bot.send_photo(
-                    chat_id=chat_id,
-                    photo=f,
-                    caption=f"📸 {filename}"
-                )
+                caption = f"🖼️ {filename} ({file_size_str}) • Original quality"
             elif mime_type and mime_type.startswith('video/'):
-                await context.bot.send_video(
-                    chat_id=chat_id,
-                    video=f,
-                    caption=f"🎥 {filename}"
-                )
+                caption = f"🎬 {filename} ({file_size_str}) • Original quality"
             elif mime_type and mime_type.startswith('audio/'):
-                await context.bot.send_audio(
-                    chat_id=chat_id,
-                    audio=f,
-                    caption=f"🎵 {filename}"
-                )
+                caption = f"🎵 {filename} ({file_size_str}) • Original quality"
             else:
-                await context.bot.send_document(
-                    chat_id=chat_id,
-                    document=f,
-                    caption=f"📄 {filename}"
-                )
+                caption = f"📄 {filename} ({file_size_str})"
+            
+            await context.bot.send_document(
+                chat_id=chat_id,
+                document=f,
+                caption=caption
+            )
         
-        return True, f"✅ Successfully sent: {filename}"
+        return True, f"✅ Successfully sent: {filename} ({file_size_str}) • Uncompressed"
         
     except Exception as e:
         log.error("Error sending file %s: %s", file_path, str(e))
