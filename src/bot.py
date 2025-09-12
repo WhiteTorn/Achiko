@@ -28,6 +28,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 ALLOWED_TELEGRAM_USER_ID = os.getenv("ALLOWED_TELEGRAM_USER_ID", "").strip()
 DOWNLOAD_ROOT = os.getenv("DOWNLOAD_ROOT", "").strip()
+UPLOAD_ROOT = os.getenv("UPLOAD_ROOT", "").strip()
 
 if not BOT_TOKEN:
     raise SystemExit("Missing TELEGRAM_BOT_TOKEN in environment.")
@@ -36,14 +37,23 @@ if not ALLOWED_TELEGRAM_USER_ID or not ALLOWED_TELEGRAM_USER_ID.isdigit():
 ALLOWED_TELEGRAM_USER_ID = int(ALLOWED_TELEGRAM_USER_ID)
 if not DOWNLOAD_ROOT:
     raise SystemExit("Missing DOWNLOAD_ROOT in environment.")
+if not UPLOAD_ROOT:
+    raise SystemExit("Missing UPLOAD_ROOT in environment.")
 
 DOWNLOAD_DIR = Path(DOWNLOAD_ROOT).expanduser().resolve()
-
+UPLOAD_DIR = Path(UPLOAD_ROOT).expanduser().resolve()
 # Ensure directory exists and is private
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 try:
     # Attempt to set restrictive permissions (best-effort on Unix)
     os.chmod(DOWNLOAD_DIR, 0o700)
+except Exception:
+    pass
+
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    # Attempt to set restrictive permissions (best-effort on Unix)
+    os.chmod(UPLOAD_DIR, 0o700)
 except Exception:
     pass
 
