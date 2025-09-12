@@ -398,7 +398,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except:
         upload_count = "?"
     
-        await update.message.reply_text(
+    await update.message.reply_text(
         "🤖 <b>File Transfer Bot</b>\n\n"
         "👋 Hey there! I can help you transfer files both ways:\n\n"
         
