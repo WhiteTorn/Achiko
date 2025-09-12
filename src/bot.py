@@ -326,21 +326,22 @@ async def send_file_to_telegram(context: ContextTypes.DEFAULT_TYPE,
             # Always send as document to preserve original quality (no compression)
             # Create caption with file info and appropriate emoji based on file type
             if mime_type and mime_type.startswith('image/'):
-                caption = f"🖼️ {filename} ({file_size_str}) • Original quality"
+                caption = f"🖼️ <code>{filename}</code> ({file_size_str}) • Original quality"
             elif mime_type and mime_type.startswith('video/'):
-                caption = f"🎬 {filename} ({file_size_str}) • Original quality"
+                caption = f"🎬 <code>{filename}</code> ({file_size_str}) • Original quality"
             elif mime_type and mime_type.startswith('audio/'):
-                caption = f"🎵 {filename} ({file_size_str}) • Original quality"
+                caption = f"🎵 <code>{filename}</code> ({file_size_str}) • Original quality"
             else:
-                caption = f"📄 {filename} ({file_size_str})"
+                caption = f"📄 <code>{filename}</code> ({file_size_str})"
             
             await context.bot.send_document(
                 chat_id=chat_id,
                 document=f,
-                caption=caption
+                caption=caption,
+                parse_mode=ParseMode.HTML
             )
         
-        return True, f"✅ Successfully sent: {filename} ({file_size_str}) • Uncompressed"
+        return True, f"✅ Successfully sent: <code>{filename}</code> ({file_size_str}) • Uncompressed"
         
     except Exception as e:
         log.error("Error sending file %s: %s", file_path, str(e))
@@ -391,13 +392,17 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             dest = safe_join(DOWNLOAD_DIR, final_name)
             ok, err = await download_file(tg_file, dest)
             if ok:
-                await msg.reply_text(f"Download complete. Saved to: {dest}")
+                await msg.reply_text(
+                    f"✅ Download complete. Saved as: <code>{final_name}</code>\n"
+                    f"📁 Path: <code>{dest}</code>",
+                    parse_mode=ParseMode.HTML
+                )
                 log.info("Downloaded %s -> %s", file_id, dest)
             else:
-                await msg.reply_text(f"Download failed: {err}")
+                await msg.reply_text(f"❌ Download failed: {err}")
                 log.error("Download failed for %s: %s", file_id, err)
         except Exception as e:
-            await msg.reply_text(f"Download failed: {e}")
+            await msg.reply_text(f"❌ Download failed: {e}")
             log.exception("Unhandled error while processing media: %s", e)
 
     # Photos are a list of sizes; pick the largest
