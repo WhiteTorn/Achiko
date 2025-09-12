@@ -141,6 +141,44 @@ def get_upload_files(upload_dir: Path) -> List[Tuple[str, int]]:
         log.error("Error listing upload files: %s", e)
     return sorted(files)
 
+def get_upload_folders(upload_dir: Path) -> List[str]:
+    """Get list of folders in upload directory"""
+    folders = []
+    try:
+        # Add root folder option
+        folders.append(".")  # Root folder
+        
+        for item in upload_dir.rglob("*"):
+            if item.is_dir():
+                rel_path = item.relative_to(upload_dir)
+                folders.append(str(rel_path))
+    except Exception as e:
+        log.error("Error listing upload folders: %s", e)
+    return sorted(folders)
+
+def get_files_in_folder(upload_dir: Path, folder_path: str) -> List[Path]:
+    """Get all files in a specific folder (non-recursive)"""
+    files = []
+    try:
+        if folder_path == "." or folder_path == "":
+            # Root folder - get files directly in upload_dir
+            target_dir = upload_dir
+        else:
+            # Specific subfolder
+            target_dir = upload_dir / folder_path
+        
+        if not target_dir.exists() or not target_dir.is_dir():
+            return files
+            
+        # Get only files in this specific directory (not subdirectories)
+        for item in target_dir.iterdir():
+            if item.is_file():
+                files.append(item)
+                
+    except Exception as e:
+        log.error("Error getting files in folder %s: %s", folder_path, e)
+    return sorted(files)
+
 def find_upload_file(upload_dir: Path, filename: str) -> Optional[Path]:
     """Find a file in upload directory (case-insensitive)"""
     try:
@@ -338,7 +376,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except:
         upload_count = "?"
     
-    await update.message.reply_text(
+        await update.message.reply_text(
         "🤖 <b>File Transfer Bot</b>\n\n"
         "👋 Hey there! I can help you transfer files both ways:\n\n"
         
@@ -348,18 +386,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         
         "📤 <b>SEND TO TELEGRAM:</b>\n"
         f"   • <code>/list</code> - Show available files ({upload_count} files ready)\n"
+        "   • <code>/folders</code> - Show available folders\n"
         "   • <code>/send filename.ext</code> - Send a specific file\n"
+        "   • <code>/send foldername</code> - Send all files in a folder\n"
         f"   • Files are loaded from: <code>{UPLOAD_DIR}</code>\n\n"
         
         "🎯 <b>AVAILABLE COMMANDS:</b>\n"
         "   • <code>/start</code> - Show this help message\n"
         "   • <code>/list</code> - List all files available to send\n"
-        "   • <code>/send &lt;filename&gt;</code> - Send a file from PC to Telegram\n\n"
+        "   • <code>/folders</code> - List all folders available to send\n"
+        "   • <code>/send &lt;filename&gt;</code> - Send a file from PC to Telegram\n"
+        "   • <code>/send &lt;foldername&gt;</code> - Send all files in a folder\n\n"
         
         "📋 <b>EXAMPLES:</b>\n"
-        "   • <code>/send document.pdf</code>\n"
-        "   • <code>/send photos/vacation.jpg</code>\n"
-        "   • <code>/send music/song.mp3</code>\n\n"
+        "   • <code>/send document.pdf</code> - Send single file\n"
+        "   • <code>/send photos</code> - Send all files in photos folder\n"
+        "   • <code>/send .</code> - Send all files in root folder\n"
+        "   • <code>/send music/rock</code> - Send all files in music/rock folder\n\n"
         
         "🔒 <b>Security:</b> Only you can use this bot!\n"
         "📁 <b>File limit:</b> Max 50MB per file (Telegram limit)",
@@ -402,41 +445,124 @@ async def handle_list_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text(message, parse_mode=ParseMode.HTML)
 
 async def handle_send_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /send command - send a specific file"""
+    """Handle /send command - send a specific file or all files in a folder"""
     if not user_is_allowed(update) or not is_private_chat(update):
         return
     
     if not context.args:
         await update.message.reply_text(
-            "❗ Please specify a filename.\n\n"
-            "Usage: <code>/send filename.ext</code>\n"
-            "Use <code>/list</code> to see available files.",
+            "❗ Please specify a filename or folder name.\n\n"
+            "Usage: <code>/send filename.ext</code> or <code>/send foldername</code>\n"
+            "Use <code>/list</code> to see available files.\n"
+            "Use <code>/folders</code> to see available folders.",
             parse_mode=ParseMode.HTML
         )
         return
     
-    filename = " ".join(context.args)  # Handle filenames with spaces
+    target = " ".join(context.args)  # Handle names with spaces
     
-    # Find the file
-    file_path = find_upload_file(UPLOAD_DIR, filename)
+    # First, try to find it as a file
+    file_path = find_upload_file(UPLOAD_DIR, target)
     
-    if not file_path:
-        await update.message.reply_text(
-            f"❌ File not found: <code>{filename}</code>\n\n"
-            f"Use <code>/list</code> to see available files.",
-            parse_mode=ParseMode.HTML
-        )
+    if file_path:
+        # It's a file - send single file
+        status_msg = await update.message.reply_text(f"📤 Sending file: <code>{target}</code>...", 
+                                                    parse_mode=ParseMode.HTML)
+        
+        success, message = await send_file_to_telegram(context, file_path, update.effective_chat.id)
+        await status_msg.edit_text(message, parse_mode=ParseMode.HTML)
         return
     
-    # Send status message
-    status_msg = await update.message.reply_text(f"📤 Sending: <code>{filename}</code>...", 
-                                                parse_mode=ParseMode.HTML)
+    # Not a file, try to find it as a folder
+    folder_path = find_upload_folder(UPLOAD_DIR, target)
     
-    # Send the file
-    success, message = await send_file_to_telegram(context, file_path, update.effective_chat.id)
+    if folder_path is not None:
+        # It's a folder - send all files in the folder
+        files_in_folder = get_files_in_folder(UPLOAD_DIR, folder_path)
+        
+        if not files_in_folder:
+            await update.message.reply_text(
+                f"📁 Folder found but contains no files: <code>{target}</code>",
+                parse_mode=ParseMode.HTML
+            )
+            return
+        
+        folder_display = "root" if folder_path == "." else folder_path
+        status_msg = await update.message.reply_text(
+            f"📁 Sending {len(files_in_folder)} files from folder: <code>{folder_display}</code>...",
+            parse_mode=ParseMode.HTML
+        )
+        
+        # Send all files in the folder
+        sent_count = 0
+        failed_count = 0
+        failed_files = []
+        
+        for file_path in files_in_folder:
+            success, message = await send_file_to_telegram(context, file_path, update.effective_chat.id)
+            if success:
+                sent_count += 1
+            else:
+                failed_count += 1
+                failed_files.append(file_path.name)
+                log.error("Failed to send %s: %s", file_path.name, message)
+            
+            # Small delay to avoid hitting rate limits
+            await asyncio.sleep(0.5)
+        
+        # Send summary
+        summary = f"📁 <b>Folder send complete!</b>\n\n"
+        summary += f"✅ Successfully sent: {sent_count} files\n"
+        if failed_count > 0:
+            summary += f"❌ Failed: {failed_count} files\n"
+            if failed_files:
+                summary += f"Failed files: {', '.join(failed_files[:5])}"
+                if len(failed_files) > 5:
+                    summary += f" and {len(failed_files) - 5} more..."
+        
+        await status_msg.edit_text(summary, parse_mode=ParseMode.HTML)
+        return
     
-    # Update status
-    await status_msg.edit_text(message, parse_mode=ParseMode.HTML)
+    # Neither file nor folder found
+    await update.message.reply_text(
+        f"❌ File or folder not found: <code>{target}</code>\n\n"
+        f"Use <code>/list</code> to see available files.\n"
+        f"Use <code>/folders</code> to see available folders.",
+        parse_mode=ParseMode.HTML
+    )
+
+
+async def handle_folders_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /folders command - show available folders"""
+    if not user_is_allowed(update) or not is_private_chat(update):
+        return
+    
+    folders = get_upload_folders(UPLOAD_DIR)
+    
+    if not folders:
+        await update.message.reply_text("📁 No folders available.")
+        return
+    
+    message = "📁 <b>Available folders:</b>\n\n"
+    
+    for folder in folders[:20]:  # Limit to avoid too long message
+        if folder == ".":
+            # Count files in root
+            files_in_root = get_files_in_folder(UPLOAD_DIR, ".")
+            message += f"📂 <code>. (root)</code> ({len(files_in_root)} files)\n"
+        else:
+            # Count files in subfolder  
+            files_in_folder = get_files_in_folder(UPLOAD_DIR, folder)
+            message += f"📂 <code>{folder}</code> ({len(files_in_folder)} files)\n"
+    
+    if len(folders) > 20:
+        message += f"\n<i>... and {len(folders) - 20} more folders</i>"
+    
+    message += "\n💡 Use <code>/send foldername</code> to send all files in a folder"
+    message += "\n💡 Use <code>/send .</code> to send all files in root folder"
+    
+    await update.message.reply_text(message, parse_mode=ParseMode.HTML)
+
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     log.exception("Error handling update: %s", context.error)
@@ -467,6 +593,12 @@ def build_app() -> Application:
     app.add_handler(CommandHandler(
         "send",
         handle_send_command,
+        filters=filters.ChatType.PRIVATE & filters.User(ALLOWED_TELEGRAM_USER_ID)
+    ))
+    
+    app.add_handler(CommandHandler(
+        "folders",
+        handle_folders_command,
         filters=filters.ChatType.PRIVATE & filters.User(ALLOWED_TELEGRAM_USER_ID)
     ))
     app.add_error_handler(error_handler)
